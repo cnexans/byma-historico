@@ -345,6 +345,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .chart-header .price-info .change.positive { color: #3fb950; }
   .chart-header .price-info .change.negative { color: #f85149; }
 
+  .timeframe-bar { display: flex; gap: 4px; margin-top: 10px; }
+  .tf-btn { padding: 4px 12px; font-size: 12px; border: 1px solid #30363d; border-radius: 6px; background: transparent; color: #8b949e; cursor: pointer; transition: all 0.15s; }
+  .tf-btn.active { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+  .tf-btn:hover:not(.active) { border-color: #58a6ff; color: #e1e4e8; }
+
   .chart-container { flex: 1; padding: 16px 24px; position: relative; min-height: 400px; }
   canvas { width: 100% !important; height: 100% !important; }
 
@@ -412,6 +417,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <div class="value" id="chart-expiry" style="font-size:16px;"></div>
         </div>
       </div>
+      <div class="timeframe-bar" id="timeframe-bar">
+        <button class="tf-btn active" data-tf="ALL">Todo</button>
+        <button class="tf-btn" data-tf="5Y">5A</button>
+        <button class="tf-btn" data-tf="1Y">1A</button>
+        <button class="tf-btn" data-tf="3M">3M</button>
+        <button class="tf-btn" data-tf="1M">1M</button>
+        <button class="tf-btn" data-tf="1W">1S</button>
+      </div>
     </div>
     <div class="chart-container" id="chart-container" style="display:none">
       <canvas id="chart"></canvas>
@@ -426,6 +439,8 @@ let report = null;
 let currentFilter = 'ALL';
 let currentSearch = '';
 let selectedTicker = null;
+let currentTimeframe = 'ALL';
+let fullData = null;
 
 // Cache for OHLCV data
 const ohlcvCache = {};
@@ -612,6 +627,28 @@ function renderList() {
   });
 }
 
+function filterByTimeframe(data, tf) {
+  if (tf === 'ALL' || !data.dates || !data.dates.length) return data;
+  const now = new Date();
+  let cutoff;
+  switch (tf) {
+    case '5Y': cutoff = new Date(now.getFullYear() - 5, now.getMonth(), now.getDate()); break;
+    case '1Y': cutoff = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()); break;
+    case '3M': cutoff = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate()); break;
+    case '1M': cutoff = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate()); break;
+    case '1W': cutoff = new Date(now.getTime() - 7 * 86400000); break;
+    default: return data;
+  }
+  const cutStr = cutoff.toISOString().slice(0, 10);
+  const startIdx = data.dates.findIndex(d => d >= cutStr);
+  if (startIdx < 0) return { dates: [], open: [], high: [], low: [], close: [], volume: [] };
+  return {
+    dates: data.dates.slice(startIdx), open: data.open.slice(startIdx),
+    high: data.high.slice(startIdx), low: data.low.slice(startIdx),
+    close: data.close.slice(startIdx), volume: data.volume.slice(startIdx),
+  };
+}
+
 async function loadChart(ticker) {
   selectedTicker = ticker;
   renderList();
@@ -636,6 +673,10 @@ async function loadChart(ticker) {
 
   if (!data.dates || data.dates.length === 0) return;
 
+  fullData = data;
+  currentTimeframe = 'ALL';
+  document.querySelectorAll('.tf-btn').forEach(b => b.classList.toggle('active', b.dataset.tf === 'ALL'));
+
   const meta = allTickers.find(t => t.ticker === ticker);
 
   document.getElementById('report').style.display = 'none';
@@ -647,18 +688,7 @@ async function loadChart(ticker) {
   document.getElementById('chart-title').innerHTML = titleHtml;
 
   const srcName = meta?.data_source === 'yahoo' ? 'Yahoo Finance' : meta?.data_source === 'iol' ? 'InvertirOnline' : 'analisistecnico.com.ar';
-  let subtitle = meta ? `${meta.trading_type} | ${data.dates.length} barras | Fuente: ${srcName}` : '';
-  document.getElementById('chart-subtitle').textContent = subtitle;
-
-  const lastClose = data.close[data.close.length - 1];
-  const firstClose = data.close[0];
-  const changePct = ((lastClose - firstClose) / firstClose * 100);
-
-  document.getElementById('chart-price').textContent = lastClose.toLocaleString('es-AR', { maximumFractionDigits: 2 });
-  const changeEl = document.getElementById('chart-change');
-  changeEl.textContent = `${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%`;
-  changeEl.className = `value change ${changePct >= 0 ? 'positive' : 'negative'}`;
-  document.getElementById('chart-period').textContent = `${data.dates[0]} a ${data.dates[data.dates.length - 1]}`;
+  document.getElementById('chart-subtitle').textContent = meta ? `${meta.trading_type} | ${data.dates.length} barras | Fuente: ${srcName}` : '';
 
   const expiryBlock = document.getElementById('chart-expiry-block');
   if (meta && meta.expiration_date) {
@@ -669,6 +699,24 @@ async function loadChart(ticker) {
   } else {
     expiryBlock.style.display = 'none';
   }
+
+  applyTimeframe();
+}
+
+function applyTimeframe() {
+  if (!fullData) return;
+  const data = filterByTimeframe(fullData, currentTimeframe);
+  if (!data.dates || !data.dates.length) return;
+
+  const lastClose = data.close[data.close.length - 1];
+  const firstClose = data.close[0];
+  const changePct = ((lastClose - firstClose) / firstClose * 100);
+
+  document.getElementById('chart-price').textContent = lastClose.toLocaleString('es-AR', { maximumFractionDigits: 2 });
+  const changeEl = document.getElementById('chart-change');
+  changeEl.textContent = `${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%`;
+  changeEl.className = `value change ${changePct >= 0 ? 'positive' : 'negative'}`;
+  document.getElementById('chart-period').textContent = `${data.dates[0]} a ${data.dates[data.dates.length - 1]}`;
 
   drawChart(data);
 }
@@ -687,20 +735,19 @@ function drawChart(data) {
 
   ctx.clearRect(0, 0, W, H);
 
-  const closes = data.close;
-  const dates = data.dates;
-  const n = closes.length;
-  if (n < 2) return;
+  const n = data.dates.length;
+  if (n < 1) return;
 
   const pad = { top: 20, right: 60, bottom: 40, left: 10 };
   const cw = W - pad.left - pad.right;
   const ch = H - pad.top - pad.bottom;
 
-  const minV = Math.min(...closes);
-  const maxV = Math.max(...closes);
+  const allLows = data.low.slice(0, n);
+  const allHighs = data.high.slice(0, n);
+  const minV = Math.min(...allLows);
+  const maxV = Math.max(...allHighs);
   const range = maxV - minV || 1;
 
-  function x(i) { return pad.left + (i / (n - 1)) * cw; }
   function y(v) { return pad.top + ch - ((v - minV) / range) * ch; }
 
   // Grid lines
@@ -713,56 +760,65 @@ function drawChart(data) {
     ctx.moveTo(pad.left, yy);
     ctx.lineTo(W - pad.right, yy);
     ctx.stroke();
-
     const val = maxV - (i / gridLines) * range;
     ctx.fillStyle = '#484f58';
     ctx.font = '11px -apple-system, sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText(val.toLocaleString('es-AR', { maximumFractionDigits: 0 }), W - pad.right + 8, yy + 4);
+    ctx.fillText(val.toLocaleString('es-AR', { maximumFractionDigits: 2 }), W - pad.right + 8, yy + 4);
   }
 
   // Date labels
+  const gap = cw / n;
   ctx.fillStyle = '#484f58';
   ctx.font = '11px -apple-system, sans-serif';
   ctx.textAlign = 'center';
   const labelCount = Math.min(8, n);
   for (let i = 0; i < labelCount; i++) {
-    const idx = Math.floor(i / (labelCount - 1) * (n - 1));
-    ctx.fillText(dates[idx], x(idx), H - pad.bottom + 20);
+    const idx = Math.floor(i / (Math.max(1, labelCount - 1)) * (n - 1));
+    const cx = pad.left + gap * (idx + 0.5);
+    ctx.fillText(data.dates[idx], cx, H - pad.bottom + 20);
   }
 
-  // Gradient fill
-  const gradient = ctx.createLinearGradient(0, pad.top, 0, pad.top + ch);
-  const isPositive = closes[n - 1] >= closes[0];
-  if (isPositive) {
-    gradient.addColorStop(0, 'rgba(63, 185, 80, 0.15)');
-    gradient.addColorStop(1, 'rgba(63, 185, 80, 0)');
-  } else {
-    gradient.addColorStop(0, 'rgba(248, 81, 73, 0.15)');
-    gradient.addColorStop(1, 'rgba(248, 81, 73, 0)');
+  // Candlesticks
+  const candleW = Math.max(1, Math.min(20, Math.floor(gap * 0.7)));
+
+  for (let i = 0; i < n; i++) {
+    const cx = pad.left + gap * (i + 0.5);
+    const oY = y(data.open[i]);
+    const cY = y(data.close[i]);
+    const hY = y(data.high[i]);
+    const lY = y(data.low[i]);
+    const bull = data.close[i] >= data.open[i];
+    const color = bull ? '#3fb950' : '#f85149';
+
+    // Wick
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx, hY);
+    ctx.lineTo(cx, lY);
+    ctx.stroke();
+
+    // Body
+    const bodyTop = Math.min(oY, cY);
+    const bodyH = Math.max(1, Math.abs(oY - cY));
+    if (candleW >= 3) {
+      ctx.fillStyle = bull ? '#3fb95020' : '#f8514920';
+      ctx.fillRect(cx - candleW / 2, bodyTop, candleW, bodyH);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(cx - candleW / 2, bodyTop, candleW, bodyH);
+    } else {
+      ctx.fillStyle = color;
+      ctx.fillRect(cx - candleW / 2, bodyTop, candleW, bodyH);
+    }
   }
-
-  ctx.beginPath();
-  ctx.moveTo(x(0), y(closes[0]));
-  for (let i = 1; i < n; i++) ctx.lineTo(x(i), y(closes[i]));
-  ctx.lineTo(x(n - 1), pad.top + ch);
-  ctx.lineTo(x(0), pad.top + ch);
-  ctx.closePath();
-  ctx.fillStyle = gradient;
-  ctx.fill();
-
-  // Line
-  ctx.beginPath();
-  ctx.moveTo(x(0), y(closes[0]));
-  for (let i = 1; i < n; i++) ctx.lineTo(x(i), y(closes[i]));
-  ctx.strokeStyle = isPositive ? '#3fb950' : '#f85149';
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
 }
 
 // Show report when clicking header
 function showReport() {
   selectedTicker = null;
+  fullData = null;
   document.getElementById('report').style.display = 'block';
   document.getElementById('chart-header').style.display = 'none';
   document.getElementById('chart-container').style.display = 'none';
@@ -784,9 +840,18 @@ document.getElementById('search').addEventListener('input', e => {
   renderList();
 });
 
+// Timeframe
+document.getElementById('timeframe-bar').addEventListener('click', e => {
+  if (!e.target.classList.contains('tf-btn')) return;
+  document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
+  e.target.classList.add('active');
+  currentTimeframe = e.target.dataset.tf;
+  if (fullData) applyTimeframe();
+});
+
 // Resize
 window.addEventListener('resize', () => {
-  if (selectedTicker) loadChart(selectedTicker);
+  if (selectedTicker && fullData) applyTimeframe();
 });
 
 // Click title to go back to report

@@ -1,0 +1,2 @@
+# No external dependencies required - uses Python 3.8+ standard library only
+# (urllib.request, ssl, sqlite3, csv, json, argparse, logging)

@@ -1,0 +1,470 @@
+openapi: 3.0.3
+info:
+  title: Análisis Técnico Argentina - Datafeed API
+  description: |
+    API de datos de mercado basada en el protocolo TradingView UDF (Universal Data Feed).
+    Provee datos históricos OHLCV para acciones, bonos, CEDEARs, monedas, índices,
+    commodities y criptomonedas del mercado argentino y CEDEARs de NYSE/NASDAQ.
+
+    **Notas importantes:**
+    - El servidor usa un certificado SSL autofirmado (requiere `verify=False` o `-k` en curl).
+    - Solo soporta resoluciones diarias (D), semanales (W) y mensuales (M). No hay datos intraday.
+    - Los bonos pueden devolver 2 entradas por día (contado y 48hs) con OHLC diferentes y volúmenes distintos.
+    - Los datos son de fin de día (`data_status: endofday`).
+  version: "1.0.0"
+
+servers:
+  - url: https://analisistecnico.com.ar/services/datafeed
+    description: Servidor de producción
+
+paths:
+  /config:
+    get:
+      summary: Configuración del servidor
+      description: Retorna la configuración del datafeed incluyendo exchanges, tipos de símbolos y resoluciones soportadas.
+      operationId: getConfig
+      responses:
+        "200":
+          description: Configuración del servidor
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConfigResponse"
+              example:
+                supports_search: true
+                supports_group_request: false
+                supports_timescale_marks: true
+                exchanges:
+                  - name: "All Exchanges"
+                    value: ""
+                    desc: ""
+                  - name: "BCBA"
+                    value: "BCBA"
+                    desc: "Bolsa de Comercio de Buenos Aires"
+                  - name: "BCRA"
+                    value: "BCRA"
+                    desc: "Banco Central de la Republica Argentina"
+                  - name: "NYSE"
+                    value: "NYSE"
+                    desc: "New York Stock Exchange"
+                  - name: "NASDAQ"
+                    value: "NASDAQ"
+                    desc: "NASDAQ Stock Market"
+                  - name: "CRYPTO"
+                    value: "CRYPTO"
+                    desc: "Crypto Market"
+                symbolsTypes:
+                  - name: "All types"
+                    value: ""
+                  - name: "Acciones"
+                    value: "stock"
+                  - name: "ADRs"
+                    value: "ADR"
+                  - name: "Bonos"
+                    value: "bond"
+                  - name: "CEDEARS"
+                    value: "CEDEARS"
+                  - name: "Monedas"
+                    value: "monedas"
+                  - name: "Indices/Tasas"
+                    value: "index"
+                  - name: "Commodities"
+                    value: "COMMODITIES"
+                  - name: "Crypto"
+                    value: "CRYPTO"
+                supportedResolutions:
+                  - "D"
+                  - "W"
+                  - "M"
+
+  /symbols:
+    get:
+      summary: Metadata de un símbolo
+      description: Retorna información detallada sobre un símbolo específico (nombre, exchange, tipo, horario, etc.).
+      operationId: getSymbol
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          description: Ticker del símbolo (ej. AL30, GGAL, YPFD)
+          schema:
+            type: string
+          example: AL30
+      responses:
+        "200":
+          description: Metadata del símbolo o error si no existe
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/SymbolInfo"
+                  - $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                bond:
+                  summary: Bono (AL30)
+                  value:
+                    name: "AL30"
+                    exchange-traded: "BCBA"
+                    exchange-listed: "BCBA"
+                    minmov: 1
+                    minmov2: 0
+                    pricescale: 100
+                    pointvalue: 1
+                    timezone: "America/Argentina/Buenos_Aires"
+                    session: "1100-1700"
+                    has_intraday: false
+                    has_no_volume: false
+                    volume_precision: 0
+                    ticker: "AL30"
+                    description: "Bono Argentina Usd Step Up 2030"
+                    type: "BOND"
+                    data_status: "endofday"
+                    expired: false
+                    expiration_date: null
+                stock:
+                  summary: Acción (GGAL)
+                  value:
+                    name: "GGAL"
+                    exchange-traded: "BCBA"
+                    exchange-listed: "BCBA"
+                    minmov: 1
+                    minmov2: 0
+                    pricescale: 100
+                    pointvalue: 1
+                    timezone: "America/Argentina/Buenos_Aires"
+                    session: "1100-1700"
+                    has_intraday: false
+                    has_no_volume: false
+                    volume_precision: 0
+                    ticker: "GGAL"
+                    description: "Grupo Financiero Galicia"
+                    type: "stock"
+                    data_status: "endofday"
+                    expired: false
+                    expiration_date: null
+                error:
+                  summary: Símbolo no encontrado
+                  value:
+                    s: "error"
+                    errmsg: "unknown_symbol INVALID_TICKER"
+
+  /search:
+    get:
+      summary: Buscar símbolos
+      description: |
+        Busca símbolos por nombre o ticker. Requiere al menos 2 caracteres.
+        La búsqueda matchea el inicio del símbolo o su descripción.
+        **Nota:** Algunas queries cortas pueden devolver error aunque el símbolo exista.
+      operationId: searchSymbols
+      parameters:
+        - name: query
+          in: query
+          required: true
+          description: Texto de búsqueda (mínimo ~2 caracteres)
+          schema:
+            type: string
+          example: "AL"
+        - name: type
+          in: query
+          required: false
+          description: "Filtrar por tipo de símbolo (stock, ADR, bond, CEDEARS, monedas, index, COMMODITIES, CRYPTO)"
+          schema:
+            type: string
+          example: "bond"
+        - name: exchange
+          in: query
+          required: false
+          description: "Filtrar por exchange (BCBA, BCRA, NYSE, NASDAQ, CRYPTO)"
+          schema:
+            type: string
+          example: "BCBA"
+        - name: limit
+          in: query
+          required: false
+          description: Número máximo de resultados
+          schema:
+            type: integer
+          example: 10
+      responses:
+        "200":
+          description: Lista de símbolos encontrados o error
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: array
+                    items:
+                      $ref: "#/components/schemas/SearchResult"
+                  - $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                success:
+                  summary: Búsqueda exitosa
+                  value:
+                    - symbol: "AL29"
+                      full_name: "AL29"
+                      description: "Bono Rep Argentina Usd 1% 2029"
+                      exchange: "BCBA"
+                      type: "BOND"
+                    - symbol: "AL30"
+                      full_name: "AL30"
+                      description: "Bono Argentina Usd Step Up 2030"
+                      exchange: "BCBA"
+                      type: "BOND"
+                error:
+                  summary: Query inválida
+                  value:
+                    s: "error"
+                    errmsg: "wrong_query"
+
+  /history:
+    get:
+      summary: Datos históricos OHLCV
+      description: |
+        Retorna datos históricos de precios (Open, High, Low, Close, Volume) para un símbolo.
+
+        **Comportamiento importante:**
+        - Si se omiten `from` y `to`, retorna TODO el historial disponible.
+        - Los bonos pueden devolver **2 entradas por fecha** (contado y 48hs settlement),
+          con el mismo OHLC o valores ligeramente diferentes y distinto volumen.
+        - Para símbolos inválidos retorna un array vacío `[]` (no un objeto de error).
+        - Los precios pueden ser enteros o decimales según el instrumento.
+      operationId: getHistory
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          description: Ticker del símbolo
+          schema:
+            type: string
+          example: "AL30"
+        - name: resolution
+          in: query
+          required: false
+          description: "Resolución temporal: D (diario), W (semanal), M (mensual). Default: D"
+          schema:
+            type: string
+            enum: ["D", "W", "M"]
+            default: "D"
+          example: "D"
+        - name: from
+          in: query
+          required: false
+          description: Timestamp Unix (segundos) de inicio del rango. Si se omite, desde el inicio del historial.
+          schema:
+            type: integer
+          example: 1739822151
+        - name: to
+          in: query
+          required: false
+          description: Timestamp Unix (segundos) de fin del rango. Si se omite, hasta el final del historial.
+          schema:
+            type: integer
+          example: 1770926211
+      responses:
+        "200":
+          description: |
+            Datos OHLCV en arrays paralelos o array vacío si el símbolo no existe.
+            Todos los arrays tienen la misma longitud.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/HistoryResponse"
+                  - type: array
+                    maxItems: 0
+                    description: Array vacío para símbolos no encontrados
+              examples:
+                success:
+                  summary: Respuesta exitosa (primeros 3 días)
+                  value:
+                    t: [1739750400, 1739836800, 1739923200]
+                    o: [6990, 6750, 7100]
+                    h: [7070, 7320, 7200]
+                    l: [6500, 6750, 6900]
+                    c: [6650, 7260, 7150]
+                    v: [2474191, 4602703, 3100000]
+                    s: "ok"
+                not_found:
+                  summary: Símbolo no encontrado
+                  value: []
+
+  /timescale_marks:
+    get:
+      summary: Marcas en la escala de tiempo
+      description: |
+        Endpoint del protocolo UDF para marcas en la escala temporal.
+        Actualmente retorna siempre un array vacío.
+      operationId: getTimescaleMarks
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: resolution
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Array vacío (sin marcas disponibles)
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 0
+              example: []
+
+components:
+  schemas:
+    ConfigResponse:
+      type: object
+      properties:
+        supports_search:
+          type: boolean
+        supports_group_request:
+          type: boolean
+        supports_timescale_marks:
+          type: boolean
+        exchanges:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              value:
+                type: string
+              desc:
+                type: string
+        symbolsTypes:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              value:
+                type: string
+        supportedResolutions:
+          type: array
+          items:
+            type: string
+
+    SymbolInfo:
+      type: object
+      properties:
+        name:
+          type: string
+        exchange-traded:
+          type: string
+        exchange-listed:
+          type: string
+        minmov:
+          type: integer
+        minmov2:
+          type: integer
+        pricescale:
+          type: integer
+        pointvalue:
+          type: integer
+        timezone:
+          type: string
+        session:
+          type: string
+          description: "Horario de trading (ej. 1100-1700)"
+        has_intraday:
+          type: boolean
+        has_no_volume:
+          type: boolean
+        volume_precision:
+          type: integer
+        ticker:
+          type: string
+        description:
+          type: string
+        type:
+          type: string
+          description: "Tipo del símbolo (BOND, stock, CEDEARS, etc.)"
+        data_status:
+          type: string
+          description: "Estado de los datos (endofday)"
+        expired:
+          type: boolean
+        expiration_date:
+          type: string
+          nullable: true
+
+    SearchResult:
+      type: object
+      properties:
+        symbol:
+          type: string
+        full_name:
+          type: string
+        description:
+          type: string
+        exchange:
+          type: string
+        type:
+          type: string
+
+    HistoryResponse:
+      type: object
+      required: [t, o, h, l, c, v, s]
+      properties:
+        t:
+          type: array
+          items:
+            type: integer
+          description: Timestamps Unix (segundos)
+        o:
+          type: array
+          items:
+            type: number
+          description: Precios de apertura
+        h:
+          type: array
+          items:
+            type: number
+          description: Precios máximos
+        l:
+          type: array
+          items:
+            type: number
+          description: Precios mínimos
+        c:
+          type: array
+          items:
+            type: number
+          description: Precios de cierre
+        v:
+          type: array
+          items:
+            type: integer
+          description: Volumen
+        s:
+          type: string
+          enum: ["ok"]
+          description: "Status (siempre 'ok' en respuestas exitosas)"
+
+    ErrorResponse:
+      type: object
+      properties:
+        s:
+          type: string
+          enum: ["error"]
+        errmsg:
+          type: string
+          description: "Mensaje de error (ej. 'unknown_symbol X', 'wrong_query')"

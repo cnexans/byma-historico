@@ -13,9 +13,15 @@ Uso:
     python scraper_cascade.py --ticker GGAL -v   # Verbose
     python scraper_cascade.py --min-years 3      # Mínimo 3 años
     python scraper_cascade.py --skip-iol         # Sin IOL (sin Playwright)
+
+Gestión de tickers:
+    python scraper_cascade.py --export-csv tickers.csv  # Exportar DB a CSV
+    python scraper_cascade.py --sync                     # Sync tickers.csv -> DB + descarga
+    python scraper_cascade.py --sync --csv mi_lista.csv  # Sync desde CSV personalizado
 """
 
 import argparse
+import csv
 import json
 import logging
 import os
@@ -594,6 +600,151 @@ def print_summary(stats: CascadeStats, total: int, min_years: float):
     print("=" * 70)
 
 
+# ─── CSV Ticker Management ───────────────────────────────────────────────────
+
+CSV_COLUMNS = ["id", "name", "ticker", "trading_type", "settlement_type", "enabled", "description"]
+
+
+def export_tickers_to_csv(conn: sqlite3.Connection, csv_path: str):
+    """Export all tickers from DB to a CSV file."""
+    rows = conn.execute(
+        "SELECT id, name, ticker, trading_type, "
+        "COALESCE(settlement_type, ''), enabled, COALESCE(description, '') "
+        "FROM tickers ORDER BY "
+        "CASE trading_type WHEN 'STOCK' THEN 1 WHEN 'CEDEARS' THEN 2 WHEN 'BOND' THEN 3 END, "
+        "ticker"
+    ).fetchall()
+
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
+        writer.writeheader()
+        for r in rows:
+            writer.writerow({
+                "id": r[0],
+                "name": r[1],
+                "ticker": r[2],
+                "trading_type": r[3],
+                "settlement_type": r[4],
+                "enabled": "true" if r[5] else "false",
+                "description": r[6],
+            })
+
+    log.info(f"Exportados {len(rows)} tickers a {csv_path}")
+    return len(rows)
+
+
+def load_tickers_from_csv(csv_path: str, conn: sqlite3.Connection) -> dict:
+    """
+    Sync CSV → DB. Returns dict with sync results:
+    {"new": [...], "updated": [...], "disabled": [...], "unchanged": N, "total_csv": N}
+    """
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        csv_rows = list(reader)
+
+    # Get existing tickers from DB
+    existing = {}
+    for row in conn.execute("SELECT ticker, name, trading_type, settlement_type, enabled, description FROM tickers"):
+        existing[row[0]] = {
+            "name": row[1], "trading_type": row[2], "settlement_type": row[3] or "",
+            "enabled": bool(row[4]), "description": row[5] or "",
+        }
+
+    result = {"new": [], "updated": [], "disabled": [], "unchanged": 0, "total_csv": len(csv_rows)}
+
+    for row in csv_rows:
+        ticker = row["ticker"].strip()
+        name = row["name"].strip()
+        trading_type = row["trading_type"].strip()
+        settlement_type = row.get("settlement_type", "").strip()
+        enabled_str = row.get("enabled", "true").strip().lower()
+        enabled = enabled_str in ("true", "1", "yes")
+        description = row.get("description", "").strip()
+
+        # Auto-assign ID if missing or 0
+        row_id = int(row.get("id", 0) or 0)
+        if row_id == 0:
+            max_id = conn.execute("SELECT COALESCE(MAX(id), 0) FROM tickers").fetchone()[0]
+            row_id = max_id + 1
+
+        # UPSERT into DB
+        conn.execute(
+            "INSERT INTO tickers (id, name, ticker, trading_type, settlement_type, enabled, description) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(ticker) DO UPDATE SET "
+            "name=excluded.name, trading_type=excluded.trading_type, "
+            "settlement_type=excluded.settlement_type, enabled=excluded.enabled, "
+            "description=excluded.description",
+            (row_id, name, ticker, trading_type, settlement_type, enabled, description),
+        )
+
+        # Classify change
+        if ticker not in existing:
+            result["new"].append({"ticker": ticker, "trading_type": trading_type, "name": name})
+        else:
+            old = existing[ticker]
+            changes = []
+            if old["name"] != name:
+                changes.append("name")
+            if old["trading_type"] != trading_type:
+                changes.append("trading_type")
+            if old["enabled"] and not enabled:
+                result["disabled"].append(ticker)
+                continue
+            if old["enabled"] != enabled:
+                changes.append("enabled")
+            if old["description"] != description:
+                changes.append("description")
+            if changes:
+                result["updated"].append({"ticker": ticker, "changes": changes})
+            else:
+                result["unchanged"] += 1
+
+    conn.commit()
+    return result
+
+
+def print_sync_report(sync_result: dict):
+    """Print sync report to console."""
+    print("\n" + "=" * 60)
+    print("SYNC REPORT: tickers.csv → DB")
+    print("=" * 60)
+    print(f"  Tickers en CSV:        {sync_result['total_csv']}")
+    print(f"  Nuevos:                {len(sync_result['new'])}")
+    print(f"  Modificados:           {len(sync_result['updated'])}")
+    print(f"  Deshabilitados:        {len(sync_result['disabled'])}")
+    print(f"  Sin cambios:           {sync_result['unchanged']}")
+
+    if sync_result["new"]:
+        print(f"\n  Tickers nuevos:")
+        for t in sync_result["new"]:
+            print(f"    + {t['ticker']:10s} {t['trading_type']:10s} {t['name']}")
+
+    if sync_result["updated"]:
+        print(f"\n  Tickers modificados:")
+        for t in sync_result["updated"]:
+            print(f"    ~ {t['ticker']:10s} ({', '.join(t['changes'])})")
+
+    if sync_result["disabled"]:
+        print(f"\n  Tickers deshabilitados:")
+        for t in sync_result["disabled"]:
+            print(f"    - {t}")
+
+    print("=" * 60 + "\n")
+
+
+def get_tickers_needing_data(conn: sqlite3.Connection, min_years: float) -> list:
+    """Get enabled tickers that have insufficient data (< min_years or no data)."""
+    all_tickers = get_enabled_tickers(conn)
+    needing = []
+    for ticker, trading_type in all_tickers:
+        min_date, max_date, count = get_ohlcv_date_range(conn, ticker)
+        yrs = years_of_data(min_date, max_date)
+        if count == 0 or yrs < min_years:
+            needing.append((ticker, trading_type))
+    return needing
+
+
 # ─── CLI ─────────────────────────────────────────────────────────────────────
 
 
@@ -640,6 +791,24 @@ def parse_args():
     parser.add_argument(
         "-v", "--verbose", action="store_true", help="Logging verbose"
     )
+
+    # Ticker management
+    parser.add_argument(
+        "--export-csv",
+        metavar="FILE",
+        help="Exportar tickers de DB a archivo CSV",
+    )
+    parser.add_argument(
+        "--sync",
+        action="store_true",
+        help="Sync tickers.csv → DB y descarga nuevos/desactualizados",
+    )
+    parser.add_argument(
+        "--csv",
+        default=None,
+        help="Ruta al CSV de tickers (default: tickers.csv en raíz del repo)",
+    )
+
     return parser.parse_args()
 
 
@@ -658,12 +827,71 @@ def main():
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     db_path = args.db_path or os.path.join(script_dir, DATA_DIR, DB_FILENAME)
+    default_csv = os.path.join(script_dir, "tickers.csv")
 
+    conn = init_db(db_path)
+
+    # ─── Mode: export DB to CSV ───────────────────────────────────────────
+    if args.export_csv:
+        count = export_tickers_to_csv(conn, args.export_csv)
+        print(f"\n✓ Exportados {count} tickers a {args.export_csv}")
+        conn.close()
+        return
+
+    # ─── Mode: sync CSV → DB + download ──────────────────────────────────
+    if args.sync:
+        csv_path = args.csv or default_csv
+        if not os.path.exists(csv_path):
+            print(f"\n✗ CSV no encontrado: {csv_path}")
+            print(f"  Generá uno con: python scraper_cascade.py --export-csv {csv_path}")
+            conn.close()
+            return
+
+        log.info(f"Sync: {csv_path} → DB")
+        sync_result = load_tickers_from_csv(csv_path, conn)
+        print_sync_report(sync_result)
+
+        # Find tickers needing data (new or insufficient history)
+        needing = get_tickers_needing_data(conn, args.min_years)
+        if not needing:
+            print("✓ Todos los tickers tienen datos suficientes.")
+            conn.close()
+            return
+
+        print(f"Descargando datos para {len(needing)} tickers que necesitan datos...")
+        log.info(f"Fuentes: ByMA → IOL → Yahoo → analisistecnico")
+        log.info(f"Mínimo de historia: {args.min_years} años")
+
+        skip_sources = set()
+        if args.skip_iol:
+            skip_sources.add("iol")
+            log.info("IOL deshabilitado (--skip-iol)")
+        if args.skip_yahoo:
+            skip_sources.add("yahoo")
+            log.info("Yahoo deshabilitado (--skip-yahoo)")
+
+        try:
+            stats = download_all(
+                needing, conn,
+                min_years=args.min_years,
+                force=True,  # Force download for tickers needing data
+                delay=args.delay,
+                skip_sources=skip_sources,
+            )
+        except KeyboardInterrupt:
+            log.warning("Interrumpido")
+            stats = CascadeStats()
+        finally:
+            stop_iol_scraper()
+
+        conn.close()
+        print_summary(stats, len(needing), args.min_years)
+        return
+
+    # ─── Mode: normal download (existing behavior) ───────────────────────
     log.info(f"Base de datos: {db_path}")
     log.info(f"Minimo de historia: {args.min_years} años")
     log.info(f"Fuentes: ByMA → IOL → Yahoo → analisistecnico")
-
-    conn = init_db(db_path)
 
     all_tickers = get_enabled_tickers(conn)
     log.info(f"Tickers habilitados: {len(all_tickers)}")

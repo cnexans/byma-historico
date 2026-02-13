@@ -4,6 +4,14 @@
   "cleanUrls": true,
   "headers": [
     {
+      "source": "/api/ohlcv/(.*).csv",
+      "headers": [
+        { "key": "Content-Type", "value": "text/csv; charset=utf-8" },
+        { "key": "Cache-Control", "value": "public, max-age=3600" },
+        { "key": "Access-Control-Allow-Origin", "value": "*" }
+      ]
+    },
+    {
       "source": "/api/(.*)",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=3600" },

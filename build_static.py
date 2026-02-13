@@ -354,6 +354,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   .tf-btn { padding: 4px 12px; font-size: 12px; border: 1px solid #30363d; border-radius: 6px; background: transparent; color: #8b949e; cursor: pointer; transition: all 0.15s; }
   .tf-btn.active { background: #1f6feb; border-color: #1f6feb; color: #fff; }
   .tf-btn:hover:not(.active) { border-color: #58a6ff; color: #e1e4e8; }
+  .download-btn { padding: 4px 14px; font-size: 12px; border: 1px solid #238636; border-radius: 6px; background: #238636; color: #fff; cursor: pointer; font-weight: 500; transition: all 0.15s; white-space: nowrap; }
+  .download-btn:hover { background: #2ea043; border-color: #2ea043; }
 
   .chart-container { flex: 1; padding: 16px 24px; position: relative; min-height: 400px; }
   canvas { width: 100% !important; height: 100% !important; }
@@ -422,13 +424,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           <div class="value" id="chart-expiry" style="font-size:16px;"></div>
         </div>
       </div>
-      <div class="timeframe-bar" id="timeframe-bar">
-        <button class="tf-btn active" data-tf="ALL">Todo</button>
-        <button class="tf-btn" data-tf="5Y">5A</button>
-        <button class="tf-btn" data-tf="1Y">1A</button>
-        <button class="tf-btn" data-tf="3M">3M</button>
-        <button class="tf-btn" data-tf="1M">1M</button>
-        <button class="tf-btn" data-tf="1W">1S</button>
+      <div style="display:flex; align-items:center; gap:12px; margin-top:10px;">
+        <div class="timeframe-bar" id="timeframe-bar" style="margin-top:0;">
+          <button class="tf-btn active" data-tf="ALL">Todo</button>
+          <button class="tf-btn" data-tf="5Y">5A</button>
+          <button class="tf-btn" data-tf="1Y">1A</button>
+          <button class="tf-btn" data-tf="3M">3M</button>
+          <button class="tf-btn" data-tf="1M">1M</button>
+          <button class="tf-btn" data-tf="1W">1S</button>
+        </div>
+        <button class="download-btn" id="download-csv" style="display:none" title="Descargar datos OHLCV en formato CSV">&#11015; CSV</button>
       </div>
     </div>
     <div class="chart-container" id="chart-container" style="display:none">
@@ -712,6 +717,23 @@ async function loadChart(ticker) {
     expiryBlock.style.display = 'none';
   }
 
+  // Download CSV button
+  const dlBtn = document.getElementById('download-csv');
+  dlBtn.style.display = 'inline-block';
+  dlBtn.onclick = () => {
+    const header = 'Date,Open,High,Low,Close,Volume';
+    const rows = fullData.dates.map((d, i) =>
+      `${d},${fullData.open[i]},${fullData.high[i]},${fullData.low[i]},${fullData.close[i]},${fullData.volume[i]}`
+    );
+    const csv = header + '\n' + rows.join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${selectedTicker}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
   applyTimeframe();
 }
 
@@ -834,6 +856,7 @@ function showReport() {
   document.getElementById('report').style.display = 'block';
   document.getElementById('chart-header').style.display = 'none';
   document.getElementById('chart-container').style.display = 'none';
+  document.getElementById('download-csv').style.display = 'none';
   renderList();
 }
 
@@ -905,16 +928,23 @@ def build(db_path: str, output_dir: str):
         json.dump(report, f, separators=(",", ":"))
     print(f"  {report['total_with_data']} tickers con datos")
 
-    # 3. Generate per-ticker OHLCV JSON files
+    # 3. Generate per-ticker OHLCV JSON + CSV files
     tickers_with_data = [t for t in tickers if t["bars"] > 0]
-    print(f"Generando {len(tickers_with_data)} archivos OHLCV...")
+    print(f"Generando {len(tickers_with_data)} archivos OHLCV (JSON + CSV)...")
     total_bars = 0
     for t in tickers_with_data:
         ohlcv = build_ohlcv_json(conn, t["ticker"])
         if ohlcv:
+            # JSON
             filepath = os.path.join(output_dir, "api", "ohlcv", f"{t['ticker']}.json")
             with open(filepath, "w") as f:
                 json.dump(ohlcv, f, separators=(",", ":"))
+            # CSV (Yahoo Finance format)
+            csv_path = os.path.join(output_dir, "api", "ohlcv", f"{t['ticker']}.csv")
+            with open(csv_path, "w") as f:
+                f.write("Date,Open,High,Low,Close,Volume\n")
+                for i in range(len(ohlcv["dates"])):
+                    f.write(f"{ohlcv['dates'][i]},{ohlcv['open'][i]},{ohlcv['high'][i]},{ohlcv['low'][i]},{ohlcv['close'][i]},{ohlcv['volume'][i]}\n")
             total_bars += len(ohlcv["dates"])
 
     print(f"  {total_bars:,} barras totales")

@@ -149,7 +149,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
   .source-detail { background: #161b22; border: 1px solid #2d333b; border-radius: 8px; padding: 20px; margin-bottom: 24px; }
   .source-detail h3 { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
-  .source-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .source-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
   .source-stat { text-align: center; padding: 12px; background: #0d1117; border-radius: 6px; }
   .source-stat .val { font-size: 24px; font-weight: 700; }
   .source-stat .lbl { font-size: 11px; color: #8b949e; margin-top: 2px; }
@@ -157,10 +157,12 @@ HTML_PAGE = r"""<!DOCTYPE html>
   .source-stat.src-at .val { color: #f0883e; }
   .source-stat.src-yahoo .val { color: #a371f7; }
   .source-stat.src-iol .val { color: #58a6ff; }
+  .source-stat.src-byma .val { color: #3fb950; }
   .source-badge { font-size: 9px; padding: 1px 5px; border-radius: 3px; font-weight: 600; flex-shrink: 0; }
   .source-badge.src-at { background: #f0883e1a; color: #f0883e; }
   .source-badge.src-yahoo { background: #a371f71a; color: #a371f7; }
   .source-badge.src-iol { background: #58a6ff1a; color: #58a6ff; }
+  .source-badge.src-byma { background: #3fb9501a; color: #3fb950; }
 
   /* ── Chart ── */
   .chart-header { padding: 16px 24px; border-bottom: 1px solid #2d333b; }
@@ -359,20 +361,25 @@ function renderReport() {
     <div class="source-detail">
       <h3>Fuentes de Datos</h3>
       <div class="source-grid">
-        <div class="source-stat src-at">
-          <div class="val">${r.src_analisistecnico}</div>
-          <div class="pct">${r.total_with_data > 0 ? (r.src_analisistecnico / r.total_with_data * 100).toFixed(0) : 0}%</div>
-          <div class="lbl">analisistecnico.com.ar</div>
+        <div class="source-stat src-byma">
+          <div class="val">${r.src_byma}</div>
+          <div class="pct">${r.total_with_data > 0 ? (r.src_byma / r.total_with_data * 100).toFixed(0) : 0}%</div>
+          <div class="lbl">ByMA Data</div>
+        </div>
+        <div class="source-stat src-iol">
+          <div class="val">${r.src_iol}</div>
+          <div class="pct">${r.total_with_data > 0 ? (r.src_iol / r.total_with_data * 100).toFixed(0) : 0}%</div>
+          <div class="lbl">InvertirOnline</div>
         </div>
         <div class="source-stat src-yahoo">
           <div class="val">${r.src_yahoo}</div>
           <div class="pct">${r.total_with_data > 0 ? (r.src_yahoo / r.total_with_data * 100).toFixed(0) : 0}%</div>
           <div class="lbl">Yahoo Finance</div>
         </div>
-        <div class="source-stat src-iol">
-          <div class="val">${r.src_iol}</div>
-          <div class="pct">${r.total_with_data > 0 ? (r.src_iol / r.total_with_data * 100).toFixed(0) : 0}%</div>
-          <div class="lbl">InvertirOnline</div>
+        <div class="source-stat src-at">
+          <div class="val">${r.src_analisistecnico}</div>
+          <div class="pct">${r.total_with_data > 0 ? (r.src_analisistecnico / r.total_with_data * 100).toFixed(0) : 0}%</div>
+          <div class="lbl">analisistecnico.com.ar</div>
         </div>
       </div>
       <div class="coverage-bar" style="margin-top:12px">
@@ -381,14 +388,16 @@ function renderReport() {
           <span>${r.total_with_data} tickers con datos</span>
         </div>
         <div class="bar-track">
-          <div class="bar-seg" style="width:${r.total_with_data > 0 ? (r.src_analisistecnico / r.total_with_data * 100) : 0}%;background:#f0883e"></div>
-          <div class="bar-seg" style="width:${r.total_with_data > 0 ? (r.src_yahoo / r.total_with_data * 100) : 0}%;background:#a371f7"></div>
+          <div class="bar-seg" style="width:${r.total_with_data > 0 ? (r.src_byma / r.total_with_data * 100) : 0}%;background:#3fb950"></div>
           <div class="bar-seg" style="width:${r.total_with_data > 0 ? (r.src_iol / r.total_with_data * 100) : 0}%;background:#58a6ff"></div>
+          <div class="bar-seg" style="width:${r.total_with_data > 0 ? (r.src_yahoo / r.total_with_data * 100) : 0}%;background:#a371f7"></div>
+          <div class="bar-seg" style="width:${r.total_with_data > 0 ? (r.src_analisistecnico / r.total_with_data * 100) : 0}%;background:#f0883e"></div>
         </div>
         <div class="coverage-legend">
-          <span><span class="dot" style="background:#f0883e"></span>analisistecnico (${r.src_analisistecnico})</span>
-          <span><span class="dot" style="background:#a371f7"></span>Yahoo Finance (${r.src_yahoo})</span>
+          <span><span class="dot" style="background:#3fb950"></span>ByMA Data (${r.src_byma})</span>
           <span><span class="dot" style="background:#58a6ff"></span>InvertirOnline (${r.src_iol})</span>
+          <span><span class="dot" style="background:#a371f7"></span>Yahoo Finance (${r.src_yahoo})</span>
+          <span><span class="dot" style="background:#f0883e"></span>analisistecnico (${r.src_analisistecnico})</span>
         </div>
       </div>
     </div>
@@ -418,8 +427,8 @@ function renderList() {
 
     let badges = `<span class="type-badge ${t.trading_type}">${t.trading_type}</span>`;
     if (t.data_source && t.bars > 0) {
-      const srcClass = t.data_source === 'yahoo' ? 'src-yahoo' : t.data_source === 'iol' ? 'src-iol' : 'src-at';
-      const srcLabel = t.data_source === 'yahoo' ? 'YF' : t.data_source === 'iol' ? 'IOL' : 'AT';
+      const srcClass = t.data_source === 'byma' ? 'src-byma' : t.data_source === 'yahoo' ? 'src-yahoo' : t.data_source === 'iol' ? 'src-iol' : 'src-at';
+      const srcLabel = t.data_source === 'byma' ? 'BYMA' : t.data_source === 'yahoo' ? 'YF' : t.data_source === 'iol' ? 'IOL' : 'AT';
       badges += ` <span class="source-badge ${srcClass}">${srcLabel}</span>`;
     }
     if (t.trading_type === 'BOND') {
@@ -490,7 +499,7 @@ async function loadChart(ticker) {
   if (meta && meta.is_expired) titleHtml += ' <span class="expired-badge" style="font-size:12px">VENCIDO</span>';
   document.getElementById('chart-title').innerHTML = titleHtml;
 
-  const srcName = meta?.data_source === 'yahoo' ? 'Yahoo Finance' : meta?.data_source === 'iol' ? 'InvertirOnline' : 'analisistecnico.com.ar';
+  const srcName = meta?.data_source === 'byma' ? 'ByMA Data' : meta?.data_source === 'yahoo' ? 'Yahoo Finance' : meta?.data_source === 'iol' ? 'InvertirOnline' : 'analisistecnico.com.ar';
   document.getElementById('chart-subtitle').textContent = meta ? `${meta.trading_type} | ${data.dates.length} barras | Fuente: ${srcName}` : '';
 
   const expiryBlock = document.getElementById('chart-expiry-block');
@@ -796,13 +805,16 @@ class Handler(SimpleHTTPRequestHandler):
         src_analisistecnico = 0
         src_yahoo = 0
         src_iol = 0
+        src_byma = 0
 
         for ticker, trading_type, description, data_source, bars in rows:
             has_data = bars > 0
 
             if has_data:
                 src = (data_source or "analisistecnico").lower()
-                if src == "yahoo":
+                if src == "byma":
+                    src_byma += 1
+                elif src == "yahoo":
                     src_yahoo += 1
                 elif src == "iol":
                     src_iol += 1
@@ -835,7 +847,7 @@ class Handler(SimpleHTTPRequestHandler):
                     if has_data:
                         bond_active_data += 1
 
-        total_with_data = src_analisistecnico + src_yahoo + src_iol
+        total_with_data = src_byma + src_analisistecnico + src_yahoo + src_iol
 
         self._send_json({
             "stock_total": stock_total,
@@ -851,6 +863,7 @@ class Handler(SimpleHTTPRequestHandler):
             "bond_active_with_data": bond_active_data,
             "bond_expired": bond_expired,
             "bond_expired_with_data": bond_expired_data,
+            "src_byma": src_byma,
             "src_analisistecnico": src_analisistecnico,
             "src_yahoo": src_yahoo,
             "src_iol": src_iol,

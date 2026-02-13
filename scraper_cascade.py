@@ -235,7 +235,7 @@ def unix_to_date(ts: int) -> str:
 # ─── Source: ByMA ────────────────────────────────────────────────────────────
 
 
-def fetch_byma(ticker: str) -> list:
+def fetch_byma(ticker: str, **kwargs) -> list:
     """Fetch OHLCV from ByMA. Returns list of row tuples or empty list."""
     now = int(time.time())
     symbol = f"{ticker}+24HS"
@@ -280,9 +280,11 @@ def fetch_byma(ticker: str) -> list:
 # ─── Source: analisistecnico ─────────────────────────────────────────────────
 
 
-def fetch_analisistecnico(ticker: str) -> list:
+def fetch_analisistecnico(ticker: str, trading_type: str = "", **kwargs) -> list:
     """Fetch OHLCV from analisistecnico.com.ar (TradingView UDF)."""
-    url = f"{AT_BASE_URL}/history?symbol={ticker}&resolution=D"
+    # CEDEARs need :CEDEAR suffix to get BCBA prices instead of foreign exchange
+    at_symbol = f"{ticker}:CEDEAR" if trading_type == "CEDEARS" else ticker
+    url = f"{AT_BASE_URL}/history?symbol={at_symbol}&resolution=D"
 
     data_bytes = _http_get(url, ssl_ctx=_ssl_ctx)
     if not data_bytes:
@@ -320,7 +322,7 @@ def fetch_analisistecnico(ticker: str) -> list:
 # ─── Source: Yahoo Finance ───────────────────────────────────────────────────
 
 
-def fetch_yahoo(ticker: str) -> list:
+def fetch_yahoo(ticker: str, **kwargs) -> list:
     """Fetch OHLCV from Yahoo Finance (.BA suffix)."""
     yahoo_symbol = f"{ticker}.BA"
     url = f"{YAHOO_URL}/{yahoo_symbol}?period1=0&period2=9999999999&interval=1d"
@@ -409,7 +411,7 @@ def stop_iol_scraper():
         _iol_scraper = None
 
 
-def fetch_iol(ticker: str) -> list:
+def fetch_iol(ticker: str, **kwargs) -> list:
     """Fetch OHLCV from IOL via Playwright scraper."""
     scraper = get_iol_scraper()
     if scraper is None:
@@ -464,7 +466,7 @@ def cascade_download(
         log.debug(f"    {ticker}: trying {source_name}... (current: {count} bars, {yrs:.1f}yr)")
 
         try:
-            rows = fetch_fn(ticker)
+            rows = fetch_fn(ticker, trading_type=trading_type)
         except Exception as e:
             log.warning(f"    {ticker}: {source_name} failed: {e}")
             time.sleep(delay)
@@ -791,6 +793,11 @@ def parse_args():
     parser.add_argument(
         "-v", "--verbose", action="store_true", help="Logging verbose"
     )
+    parser.add_argument(
+        "--fix-cedears",
+        action="store_true",
+        help="Re-descargar CEDEARs con datos incorrectos de analisistecnico",
+    )
 
     # Ticker management
     parser.add_argument(
@@ -886,6 +893,60 @@ def main():
 
         conn.close()
         print_summary(stats, len(needing), args.min_years)
+        return
+
+    # ─── Mode: fix CEDEARs with wrong analisistecnico data ──────────────
+    if args.fix_cedears:
+        cedear_at = conn.execute(
+            "SELECT DISTINCT o.ticker FROM ohlcv o "
+            "JOIN tickers t ON o.ticker = t.ticker "
+            "WHERE t.trading_type = 'CEDEARS' AND o.data_source = 'analisistecnico'"
+        ).fetchall()
+        tickers_to_fix = [r[0] for r in cedear_at]
+
+        if not tickers_to_fix:
+            print("\n✓ No hay CEDEARs con datos de analisistecnico para corregir.")
+            conn.close()
+            return
+
+        print(f"\nEncontrados {len(tickers_to_fix)} CEDEARs con datos de analisistecnico para corregir.")
+        print(f"Tickers: {', '.join(sorted(tickers_to_fix)[:20])}{'...' if len(tickers_to_fix) > 20 else ''}")
+
+        # Delete the wrong analisistecnico data for these CEDEARs
+        for ticker in tickers_to_fix:
+            conn.execute(
+                "DELETE FROM ohlcv WHERE ticker = ? AND data_source = 'analisistecnico'",
+                (ticker,),
+            )
+        conn.commit()
+        print(f"Eliminados datos incorrectos de analisistecnico para {len(tickers_to_fix)} CEDEARs.")
+
+        # Re-download with cascade (now with :CEDEAR suffix)
+        tickers_with_types = [(t, "CEDEARS") for t in sorted(tickers_to_fix)]
+        log.info(f"Re-descargando {len(tickers_with_types)} CEDEARs...")
+
+        skip_sources = set()
+        if args.skip_iol:
+            skip_sources.add("iol")
+        if args.skip_yahoo:
+            skip_sources.add("yahoo")
+
+        try:
+            stats = download_all(
+                tickers_with_types, conn,
+                min_years=args.min_years,
+                force=True,
+                delay=args.delay,
+                skip_sources=skip_sources,
+            )
+        except KeyboardInterrupt:
+            log.warning("Interrumpido")
+            stats = CascadeStats()
+        finally:
+            stop_iol_scraper()
+
+        conn.close()
+        print_summary(stats, len(tickers_with_types), args.min_years)
         return
 
     # ─── Mode: normal download (existing behavior) ───────────────────────

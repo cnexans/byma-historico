@@ -61,6 +61,9 @@ endif
 download-byma: ## Descargar solo desde ByMA
 	$(PYTHON) scraper_byma.py -v
 
+fix-cedears: ## Re-descargar CEDEARs con precios incorrectos de analisistecnico
+	$(PYTHON) scraper_cascade.py --fix-cedears --skip-iol -v
+
 # ─── Sync (CSV -> DB) ───────────────────────────────────────────────────────
 
 sync: ## Sync tickers.csv -> DB y descargar nuevos/faltantes
